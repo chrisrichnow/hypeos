@@ -1,17 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getThemeForUser, applyTheme, themes } from "@/lib/themes";
 import { seedContextFiles } from "@/lib/seedContext";
 
 type OccupationType = "student" | "professional" | "entrepreneur" | "other";
 
-const STEPS = ["Who are you?", "Where?", "What for?", "Your HypeOS"];
+const STEPS = ["Who are you?", "Where?", "What for?", "Right now", "This quarter", "Your HypeOS"];
 
 export default function OnboardingPage() {
-  const router = useRouter();
   const supabase = createClient();
 
   const [step, setStep] = useState(0);
@@ -20,6 +18,9 @@ export default function OnboardingPage() {
   const [school, setSchool] = useState("");
   const [employer, setEmployer] = useState("");
   const [useCases, setUseCases] = useState<string[]>([]);
+  const [topPriority, setTopPriority] = useState("");
+  const [currentLoad, setCurrentLoad] = useState("");
+  const [goals, setGoals] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
@@ -36,40 +37,61 @@ export default function OnboardingPage() {
     setSaving(true);
     setSaveError("");
 
-    const { data: { user } } = await supabase.auth.getUser();
+    // Get user — retry up to 3 times
+    let user = null;
+    for (let i = 0; i < 3; i++) {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (data.user) { user = data.user; break; }
+      } catch { /* retry */ }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+
     if (!user) {
-      setSaveError("Session expired — try refreshing the page.");
-      setSaving(false);
+      // Last resort: redirect anyway and let middleware sort it out
+      window.location.href = "/";
       return;
     }
 
-    const { error } = await supabase.from("profiles").update({
-      name,
-      occupation,
-      school: school || null,
-      employer: employer || null,
-      theme_preset: themeKey,
-      use_cases: useCases,
-      onboarding_done: true,
-    }).eq("id", user.id);
-
-    if (error) {
-      setSaveError(error.message);
-      setSaving(false);
-      return;
+    // Save profile — retry up to 3 times, always continue regardless
+    for (let i = 0; i < 3; i++) {
+      try {
+        const { error } = await supabase.from("profiles").update({
+          name,
+          occupation,
+          school: school || null,
+          employer: employer || null,
+          theme_preset: themeKey,
+          use_cases: useCases,
+          onboarding_done: true,
+        }).eq("id", user.id);
+        if (!error) break;
+      } catch { /* retry */ }
+      await new Promise((r) => setTimeout(r, 500));
     }
 
-    await seedContextFiles(supabase, user.id, { name, occupation, school, employer, useCases });
+    // Seed context files — fire and forget, never block the redirect
+    seedContextFiles(supabase, user.id, {
+      name, occupation, school, employer, useCases, topPriority, currentLoad, goals,
+    }).catch(() => { /* non-critical, user can fill in files later */ });
 
     applyTheme(themeKey);
-    router.push("/");
-    router.refresh();
+    window.location.href = "/";
   }
+
+  const goalCategories = [
+    useCases.includes("school") || occupation === "student" ? { key: "school", label: "Academic goal", placeholder: "e.g. Finish the semester with a 3.5 GPA, no late assignments" } : null,
+    useCases.includes("work") || occupation === "professional" ? { key: "work", label: "Career / work goal", placeholder: "e.g. Land a promotion, finish the Q2 project on time" } : null,
+    useCases.includes("business") || occupation === "entrepreneur" ? { key: "business", label: "Business goal", placeholder: "e.g. Land first paying client, hit $2k/month" } : null,
+    useCases.includes("personal") ? { key: "personal", label: "Personal goal", placeholder: "e.g. Build a consistent workout routine" } : null,
+  ].filter(Boolean) as { key: string; label: string; placeholder: string }[];
 
   const canNext = [
     name.trim().length > 0 && occupation !== "",
-    true, // school/employer optional
+    true,
     useCases.length > 0,
+    topPriority.trim().length > 0,
+    true,
     true,
   ][step];
 
@@ -249,8 +271,105 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* Step 4 — Preview */}
+        {/* Step 4 — Right now */}
         {step === 3 && (
+          <div className="flex flex-col gap-6">
+            <div>
+              <h2 className="text-xl font-semibold mb-1" style={{ color: "var(--text-active)" }}>
+                What's your #1 priority right now?
+              </h2>
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                One sentence. What is everything else supporting?
+              </p>
+            </div>
+
+            <input
+              type="text"
+              value={topPriority}
+              onChange={(e) => setTopPriority(e.target.value)}
+              className="px-3 py-2 rounded-md text-sm outline-none"
+              style={{
+                background: "var(--bg-sidebar)",
+                border: "1px solid var(--border)",
+                color: "var(--text-primary)",
+              }}
+              placeholder="e.g. Land a summer internship before the semester ends"
+              autoFocus
+            />
+
+            <div>
+              <label className="text-xs font-medium block mb-1.5" style={{ color: "var(--text-muted)" }}>
+                What else are you currently juggling? (optional)
+              </label>
+              <textarea
+                value={currentLoad}
+                onChange={(e) => setCurrentLoad(e.target.value)}
+                rows={4}
+                className="w-full px-3 py-2 rounded-md text-sm outline-none resize-none"
+                style={{
+                  background: "var(--bg-sidebar)",
+                  border: "1px solid var(--border)",
+                  color: "var(--text-primary)",
+                }}
+                placeholder={"One item per line:\n5 active classes this semester\nBuilding a freelance client pipeline\nPrepping for technical interviews"}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Step 5 — This quarter */}
+        {step === 4 && (
+          <div className="flex flex-col gap-6">
+            <div>
+              <h2 className="text-xl font-semibold mb-1" style={{ color: "var(--text-active)" }}>
+                What do you want to accomplish this quarter?
+              </h2>
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+                One goal per area. These become your milestones.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-4">
+              {goalCategories.map(({ key, label, placeholder }) => (
+                <div key={key} className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>{label}</label>
+                  <input
+                    type="text"
+                    value={goals[key] ?? ""}
+                    onChange={(e) => setGoals((prev) => ({ ...prev, [key]: e.target.value }))}
+                    className="px-3 py-2 rounded-md text-sm outline-none"
+                    style={{
+                      background: "var(--bg-sidebar)",
+                      border: "1px solid var(--border)",
+                      color: "var(--text-primary)",
+                    }}
+                    placeholder={placeholder}
+                  />
+                </div>
+              ))}
+              {goalCategories.length === 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>Top goal this quarter</label>
+                  <input
+                    type="text"
+                    value={goals["general"] ?? ""}
+                    onChange={(e) => setGoals((prev) => ({ ...prev, general: e.target.value }))}
+                    className="px-3 py-2 rounded-md text-sm outline-none"
+                    style={{
+                      background: "var(--bg-sidebar)",
+                      border: "1px solid var(--border)",
+                      color: "var(--text-primary)",
+                    }}
+                    placeholder="e.g. Ship the project I've been sitting on"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Step 6 — Preview */}
+        {step === 5 && (
           <div className="flex flex-col gap-6">
             <div>
               <h2 className="text-xl font-semibold mb-1" style={{ color: "var(--text-active)" }}>
