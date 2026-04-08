@@ -6,21 +6,42 @@ const client = new Anthropic();
 export async function POST(req: Request) {
   const { messages } = await req.json();
 
-  // Fetch user's memories to inject into system prompt
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
+  let profileBlock = "";
   let memoryBlock = "";
+
   if (user) {
-    const { data: memories } = await supabase
-      .from("memories")
-      .select("name, type, body")
-      .eq("user_id", user.id)
-      .order("created_at");
+    const [{ data: profile }, { data: memories }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("name, occupation, school, employer")
+        .eq("id", user.id)
+        .single(),
+      supabase
+        .from("memories")
+        .select("name, type, body")
+        .eq("user_id", user.id)
+        .order("created_at"),
+    ]);
+
+    if (profile) {
+      const parts = [
+        profile.name && `Name: ${profile.name}`,
+        profile.occupation && `Role: ${profile.occupation}`,
+        profile.school && `School: ${profile.school}`,
+        profile.employer && `Employer: ${profile.employer}`,
+      ].filter(Boolean);
+
+      if (parts.length > 0) {
+        profileBlock = "\n\n## About the user\n" + parts.join("\n");
+      }
+    }
 
     if (memories && memories.length > 0) {
       memoryBlock =
-        "\n\n## What you know about the user\n" +
+        "\n\n## Saved memories\n" +
         memories.map((m) => `[${m.type}] ${m.name}: ${m.body}`).join("\n");
     }
   }
@@ -29,7 +50,8 @@ export async function POST(req: Request) {
     model: "claude-sonnet-4-6",
     max_tokens: 1024,
     system:
-      "You are a personal AI assistant built into HypeOS — the user's personal operating system. Be concise, direct, and helpful. No fluff." +
+      "You are a personal AI assistant built into HypeOS — the user's personal operating system. You have context about who they are. Be concise, direct, and helpful. Use their name naturally but not on every message. No fluff." +
+      profileBlock +
       memoryBlock,
     messages,
   });

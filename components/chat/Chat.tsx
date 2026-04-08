@@ -8,7 +8,13 @@ type Message = {
   content: string;
 };
 
-const GREETING: Message = { role: "assistant", content: "Hey. What do you need?" };
+function buildGreeting(name?: string): Message {
+  const hey = name ? `Hey, ${name}.` : "Hey.";
+  return {
+    role: "assistant",
+    content: `${hey} I'm your HypeOS assistant.\n\nI can help you think through tasks, draft things, answer questions, or just be a sounding board. I remember context across sessions — the more we talk, the more useful I get.\n\nWhat do you need?`,
+  };
+}
 
 export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -19,24 +25,25 @@ export default function Chat() {
   const convIdRef = useRef<string | null>(null);
   const supabase = createClient();
 
-  // Load conversation from DB on mount
+  // Load conversation and profile from DB on mount
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoaded(true); return; }
 
-      const { data } = await supabase
-        .from("conversations")
-        .select("id, messages")
-        .eq("user_id", user.id)
-        .maybeSingle();
+      const [{ data: conv }, { data: profile }] = await Promise.all([
+        supabase.from("conversations").select("id, messages").eq("user_id", user.id).maybeSingle(),
+        supabase.from("profiles").select("name").eq("id", user.id).single(),
+      ]);
 
-      if (data) {
-        convIdRef.current = data.id;
-        const saved = data.messages as Message[];
-        setMessages(saved?.length > 0 ? saved : [GREETING]);
+      const greeting = buildGreeting(profile?.name ?? undefined);
+
+      if (conv) {
+        convIdRef.current = conv.id;
+        const saved = conv.messages as Message[];
+        setMessages(saved?.length > 0 ? saved : [greeting]);
       } else {
-        setMessages([GREETING]);
+        setMessages([greeting]);
       }
       setLoaded(true);
     }
@@ -141,7 +148,7 @@ export default function Chat() {
         {messages.length > 1 && (
           <button
             onClick={() => {
-              const reset = [GREETING];
+              const reset = [buildGreeting()];
               setMessages(reset);
               persist(reset);
             }}
