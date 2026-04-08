@@ -6,12 +6,12 @@ import Editor from "@/components/editor/Editor";
 import Chat from "@/components/chat/Chat";
 
 export default function Home() {
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      <Sidebar selected={selectedFile} onSelect={setSelectedFile} />
-      <Editor file={selectedFile} />
+      <Sidebar selected={selectedPath} onSelect={setSelectedPath} />
+      <Editor path={selectedPath} />
       <Chat />
     </div>
   );
