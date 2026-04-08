@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { getThemeForUser, applyTheme, themes } from "@/lib/themes";
+import { seedContextFiles } from "@/lib/seedContext";
 
 type OccupationType = "student" | "professional" | "entrepreneur" | "other";
 
@@ -57,6 +58,8 @@ export default function OnboardingPage() {
       setSaving(false);
       return;
     }
+
+    await seedContextFiles(supabase, user.id, { name, occupation, school, employer, useCases });
 
     applyTheme(themeKey);
     router.push("/");

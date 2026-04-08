@@ -10,15 +10,22 @@ export async function POST(req: Request) {
   const { data: { user } } = await supabase.auth.getUser();
 
   let profileBlock = "";
+  let contextBlock = "";
   let memoryBlock = "";
 
   if (user) {
-    const [{ data: profile }, { data: memories }] = await Promise.all([
+    const [{ data: profile }, { data: contextFiles }, { data: memories }] = await Promise.all([
       supabase
         .from("profiles")
         .select("name, occupation, school, employer")
         .eq("id", user.id)
         .single(),
+      supabase
+        .from("files")
+        .select("path, content")
+        .eq("user_id", user.id)
+        .like("path", "context/%")
+        .order("path"),
       supabase
         .from("memories")
         .select("name, type, body")
@@ -39,6 +46,15 @@ export async function POST(req: Request) {
       }
     }
 
+    if (contextFiles && contextFiles.length > 0) {
+      const filled = contextFiles.filter((f) => f.content?.trim());
+      if (filled.length > 0) {
+        contextBlock =
+          "\n\n## User's context files\n" +
+          filled.map((f) => `### ${f.path}\n${f.content}`).join("\n\n");
+      }
+    }
+
     if (memories && memories.length > 0) {
       memoryBlock =
         "\n\n## Saved memories\n" +
@@ -52,6 +68,7 @@ export async function POST(req: Request) {
     system:
       "You are a personal AI assistant built into HypeOS — the user's personal operating system. You have context about who they are. Be concise, direct, and helpful. Use their name naturally but not on every message. No fluff." +
       profileBlock +
+      contextBlock +
       memoryBlock,
     messages,
   });
