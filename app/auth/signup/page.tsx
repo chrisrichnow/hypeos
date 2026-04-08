@@ -3,14 +3,13 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
+  const [confirmed, setConfirmed] = useState(false);
   const supabase = createClient();
 
   async function handleSignup(e: React.FormEvent) {
@@ -24,9 +23,28 @@ export default function SignupPage() {
       setError(error.message);
       setLoading(false);
     } else {
-      router.push("/onboarding");
-      router.refresh();
+      setConfirmed(true);
     }
+  }
+
+  if (confirmed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg-base)" }}>
+        <div className="w-full max-w-sm text-center">
+          <h1 className="text-2xl font-bold mb-3" style={{ color: "var(--text-active)" }}>Check your email</h1>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            We sent a confirmation link to <span style={{ color: "var(--text-primary)" }}>{email}</span>.
+            Click it to activate your account and get started.
+          </p>
+          <p className="text-xs mt-6" style={{ color: "var(--text-muted)" }}>
+            Already confirmed?{" "}
+            <Link href="/auth/login" style={{ color: "var(--accent)" }}>
+              Sign in
+            </Link>
+          </p>
+        </div>
+      </div>
+    );
   }
 
   return (
