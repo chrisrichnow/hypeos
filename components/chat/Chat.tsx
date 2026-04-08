@@ -111,6 +111,12 @@ export default function Chat() {
     } finally {
       setLoading(false);
       persist(finalMessages);
+      // Fire and forget — extract any memories from this exchange
+      fetch("/api/memories/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: finalMessages }),
+      });
     }
   }
 
