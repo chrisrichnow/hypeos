@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Message = {
   role: "user" | "assistant";
@@ -11,11 +11,16 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Hey Chris. What do you need?",
+      content: "Hey. What do you need?",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   async function send() {
     const text = input.trim();
@@ -26,14 +31,29 @@ export default function Chat() {
     setInput("");
     setLoading(true);
 
+    // Add empty assistant message to stream into
+    const withPlaceholder: Message[] = [...newMessages, { role: "assistant", content: "" }];
+    setMessages(withPlaceholder);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: newMessages }),
       });
-      const data = await res.json();
-      setMessages([...newMessages, { role: "assistant", content: data.reply }]);
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        setMessages([...newMessages, { role: "assistant", content: accumulated }]);
+      }
     } catch {
       setMessages([
         ...newMessages,
@@ -67,26 +87,20 @@ export default function Chat() {
         {messages.map((msg, i) => (
           <div key={i} className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}>
             <div
-              className="text-xs px-3 py-2 rounded-lg max-w-[90%] leading-relaxed"
+              className="text-xs px-3 py-2 rounded-lg max-w-[90%] leading-relaxed whitespace-pre-wrap"
               style={{
                 background: msg.role === "user" ? "var(--accent)" : "rgba(255,255,255,0.06)",
                 color: "var(--text-primary)",
               }}
             >
               {msg.content}
+              {loading && i === messages.length - 1 && msg.role === "assistant" && (
+                <span className="animate-pulse">▍</span>
+              )}
             </div>
           </div>
         ))}
-        {loading && (
-          <div className="flex items-start">
-            <div
-              className="text-xs px-3 py-2 rounded-lg"
-              style={{ background: "rgba(255,255,255,0.06)", color: "var(--text-muted)" }}
-            >
-              ...
-            </div>
-          </div>
-        )}
+        <div ref={bottomRef} />
       </div>
 
       {/* Input */}
