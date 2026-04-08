@@ -1,26 +1,70 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 type Message = {
   role: "user" | "assistant";
   content: string;
 };
 
+const GREETING: Message = { role: "assistant", content: "Hey. What do you need?" };
+
 export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Hey. What do you need?",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const convIdRef = useRef<string | null>(null);
+  const supabase = createClient();
+
+  // Load conversation from DB on mount
+  useEffect(() => {
+    async function load() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoaded(true); return; }
+
+      const { data } = await supabase
+        .from("conversations")
+        .select("id, messages")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (data) {
+        convIdRef.current = data.id;
+        const saved = data.messages as Message[];
+        setMessages(saved?.length > 0 ? saved : [GREETING]);
+      } else {
+        setMessages([GREETING]);
+      }
+      setLoaded(true);
+    }
+    load();
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  async function persist(msgs: Message[]) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    if (convIdRef.current) {
+      await supabase
+        .from("conversations")
+        .update({ messages: msgs, updated_at: new Date().toISOString() })
+        .eq("id", convIdRef.current);
+    } else {
+      const { data } = await supabase
+        .from("conversations")
+        .insert({ user_id: user.id, messages: msgs })
+        .select("id")
+        .single();
+      if (data) convIdRef.current = data.id;
+    }
+  }
 
   async function send() {
     const text = input.trim();
@@ -31,9 +75,10 @@ export default function Chat() {
     setInput("");
     setLoading(true);
 
-    // Add empty assistant message to stream into
     const withPlaceholder: Message[] = [...newMessages, { role: "assistant", content: "" }];
     setMessages(withPlaceholder);
+
+    let finalMessages = withPlaceholder;
 
     try {
       const res = await fetch("/api/chat", {
@@ -52,15 +97,20 @@ export default function Chat() {
         const { done, value } = await reader.read();
         if (done) break;
         accumulated += decoder.decode(value, { stream: true });
-        setMessages([...newMessages, { role: "assistant", content: accumulated }]);
+        const updated: Message[] = [...newMessages, { role: "assistant", content: accumulated }];
+        setMessages(updated);
+        finalMessages = updated;
       }
     } catch {
-      setMessages([
+      const errMessages: Message[] = [
         ...newMessages,
         { role: "assistant", content: "Something went wrong. Try again." },
-      ]);
+      ];
+      setMessages(errMessages);
+      finalMessages = errMessages;
     } finally {
       setLoading(false);
+      persist(finalMessages);
     }
   }
 
@@ -76,38 +126,55 @@ export default function Chat() {
     >
       {/* Header */}
       <div
-        className="px-4 py-2 text-xs font-semibold uppercase tracking-widest"
-        style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}
+        className="flex items-center justify-between px-4 py-2"
+        style={{ borderBottom: "1px solid var(--border)" }}
       >
-        AI Assistant
+        <span className="text-xs font-semibold uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+          AI Assistant
+        </span>
+        {messages.length > 1 && (
+          <button
+            onClick={() => {
+              const reset = [GREETING];
+              setMessages(reset);
+              persist(reset);
+            }}
+            className="text-[10px] hover:opacity-100 transition-opacity"
+            style={{ color: "var(--text-muted)", opacity: 0.5 }}
+            title="Clear chat"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}>
-            <div
-              className="text-xs px-3 py-2 rounded-lg max-w-[90%] leading-relaxed whitespace-pre-wrap"
-              style={{
-                background: msg.role === "user" ? "var(--accent)" : "rgba(255,255,255,0.06)",
-                color: "var(--text-primary)",
-              }}
-            >
-              {msg.content}
-              {loading && i === messages.length - 1 && msg.role === "assistant" && (
-                <span className="animate-pulse">▍</span>
-              )}
+        {!loaded ? (
+          <div className="text-xs" style={{ color: "var(--text-muted)" }}>Loading...</div>
+        ) : (
+          messages.map((msg, i) => (
+            <div key={i} className={`flex flex-col gap-1 ${msg.role === "user" ? "items-end" : "items-start"}`}>
+              <div
+                className="text-xs px-3 py-2 rounded-lg max-w-[90%] leading-relaxed whitespace-pre-wrap"
+                style={{
+                  background: msg.role === "user" ? "var(--accent)" : "rgba(255,255,255,0.06)",
+                  color: "var(--text-primary)",
+                }}
+              >
+                {msg.content}
+                {loading && i === messages.length - 1 && msg.role === "assistant" && (
+                  <span className="animate-pulse">▍</span>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
         <div ref={bottomRef} />
       </div>
 
       {/* Input */}
-      <div
-        className="p-3"
-        style={{ borderTop: "1px solid var(--border)" }}
-      >
+      <div className="p-3" style={{ borderTop: "1px solid var(--border)" }}>
         <div
           className="flex items-end gap-2 rounded-md px-3 py-2"
           style={{ background: "rgba(255,255,255,0.06)" }}
