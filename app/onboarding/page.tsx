@@ -20,6 +20,7 @@ export default function OnboardingPage() {
   const [employer, setEmployer] = useState("");
   const [useCases, setUseCases] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const themeKey = getThemeForUser(school, employer, occupation || undefined);
   const theme = themes[themeKey];
@@ -32,10 +33,16 @@ export default function OnboardingPage() {
 
   async function finish() {
     setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    setSaveError("");
 
-    await supabase.from("profiles").update({
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setSaveError("Session expired — try refreshing the page.");
+      setSaving(false);
+      return;
+    }
+
+    const { error } = await supabase.from("profiles").update({
       name,
       occupation,
       school: school || null,
@@ -44,6 +51,12 @@ export default function OnboardingPage() {
       use_cases: useCases,
       onboarding_done: true,
     }).eq("id", user.id);
+
+    if (error) {
+      setSaveError(error.message);
+      setSaving(false);
+      return;
+    }
 
     applyTheme(themeKey);
     router.push("/");
@@ -291,7 +304,12 @@ export default function OnboardingPage() {
         )}
 
         {/* Navigation */}
-        <div className="flex gap-2 mt-8">
+        {saveError && (
+          <p className="text-xs px-3 py-2 rounded-md mt-6" style={{ background: "#3a0a0a", color: "#f87171" }}>
+            {saveError}
+          </p>
+        )}
+        <div className="flex gap-2 mt-4">
           {step > 0 && (
             <button
               onClick={() => setStep(step - 1)}
